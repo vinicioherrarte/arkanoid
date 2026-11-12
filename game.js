@@ -11,6 +11,20 @@ const LIVES_START = 3;
 const HIGH_SCORES_KEY = 'arkanoid:v1';
 const HIGH_SCORES_MAX = 5;
 const EXPLOSION_FRAME_MS = EXPLOSION_DURATION / 4; // 37.5 ms por frame
+const LEVEL_COUNT = 3;
+const SOUNDS = {
+  bounce: 'assets/sounds/ball-bounce.mp3',
+  break: 'assets/sounds/break-sound.mp3',
+};
+// 'X' = ladrillo, '.' = hueco. Una cadena por fila, de arriba abajo, 10 caracteres por cadena.
+const LEVEL_PATTERNS = [
+  // Nivel 1: 60 ladrillos. Grilla completa, igual que el MVP.
+  ['XXXXXXXXXX', 'XXXXXXXXXX', 'XXXXXXXXXX', 'XXXXXXXXXX', 'XXXXXXXXXX', 'XXXXXXXXXX'],
+  // Nivel 2: 45 ladrillos. Filas 0, 2 y 4 completas. Filas 1, 3 y 5 con ladrillos en las columnas 0, 2, 4, 6 y 8.
+  ['XXXXXXXXXX', 'X.X.X.X.X.', 'XXXXXXXXXX', 'X.X.X.X.X.', 'XXXXXXXXXX', 'X.X.X.X.X.'],
+  // Nivel 3: 48 ladrillos. Filas 0, 1, 4 y 5 completas. Filas 2 y 3 solo en las columnas 0, 1, 8 y 9.
+  ['XXXXXXXXXX', 'XXXXXXXXXX', 'XX......XX', 'XX......XX', 'XXXXXXXXXX', 'XXXXXXXXXX'],
+];
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -28,12 +42,30 @@ const state = {
   keys: { left: false, right: false },
   relaunchAt: 0,
   victoryAt: 0,        // timestamp (ms) desde el cual se muestra la victoria; 0 = no programada
+  level: 1,            // 1 | 2 | 3, nivel en curso
+  muted: false,        // true tras presionar M. Solo en memoria.
 };
 
-function buildBricks() {
+// Reproduce un sonido de SOUNDS. Crea un Audio nuevo para permitir sonidos superpuestos.
+// Errores de carga o play() rechazado se ignoran: el juego sigue sin sonido.
+function playSound(name) {
+  if (state.muted) return;
+  try {
+    const audio = new Audio(SOUNDS[name]);
+    const playing = audio.play();
+    if (playing && typeof playing.catch === 'function') playing.catch(() => {});
+  } catch (e) {
+    // Audio no disponible: el juego sigue sin sonido.
+  }
+}
+
+// Construye los ladrillos del nivel n desde LEVEL_PATTERNS y reinicia la pelota.
+function loadLevel(n) {
+  state.level = n;
   state.bricks = [];
-  for (let row = 0; row < GRID.rows; row++) {
-    for (let col = 0; col < GRID.cols; col++) {
+  LEVEL_PATTERNS[n - 1].forEach((pattern, row) => {
+    for (let col = 0; col < pattern.length; col++) {
+      if (pattern[col] !== 'X') continue;
       state.bricks.push({
         col,
         row,
@@ -46,7 +78,14 @@ function buildBricks() {
         explodingSince: null,
       });
     }
-  }
+  });
+  state.phase = 'esperando';
+  state.ball.attached = true;
+  state.ball.vx = 0;
+  state.ball.vy = 0;
+  state.relaunchAt = performance.now() + RELAUNCH_DELAY_MS;
+  state.victoryAt = 0;
+  placeBallOnPaddle();
 }
 
 function clampPaddle() {
@@ -101,7 +140,13 @@ function checkGameOver() {
   } else if (!state.bricks.some((b) => b.alive)) {
     const now = Date.now();
     if (state.victoryAt === 0) state.victoryAt = now + EXPLOSION_DURATION;
-    if (now >= state.victoryAt) endGame('victoria');
+    if (now >= state.victoryAt) {
+      if (state.level < LEVEL_COUNT) {
+        loadLevel(state.level + 1);
+      } else {
+        endGame('victoria');
+      }
+    }
   }
 }
 
@@ -111,6 +156,7 @@ function endGame(outcome) {
   state.ball.attached = true;
   state.ball.vx = 0;
   state.ball.vy = 0;
+  playSound('break');
   saveHighScore(state.score);
 }
 
@@ -140,18 +186,11 @@ function saveHighScore(score) {
 }
 
 function resetGame() {
-  state.phase = 'esperando';
   state.outcome = null;
   state.score = 0;
   state.lives = LIVES_START;
   state.paddle.x = 350;
-  state.ball.attached = true;
-  state.ball.vx = 0;
-  state.ball.vy = 0;
-  state.relaunchAt = 0;
-  state.victoryAt = 0;
-  buildBricks(); // recrea los ladrillos con explodingSince = null
-  placeBallOnPaddle();
+  loadLevel(1); // nivel 1, ladrillos nuevos, pelota sobre el paddle; conserva state.muted
 }
 
 const RESTART_BUTTON = { x: 300, y: 440, w: 200, h: 50 };
@@ -202,6 +241,8 @@ function checkBallFell() {
   const b = state.ball;
   if (b.y <= CANVAS_H) return;
   state.lives -= 1;
+  // Si era la última vida, endGame reproduce el mismo sonido: no se duplica.
+  if (state.lives > 0) playSound('break');
   b.attached = true;
   b.vx = 0;
   b.vy = 0;
@@ -224,6 +265,8 @@ function bounceOffBricks() {
     brick.alive = false;
     brick.explodingSince = Date.now();
     state.score += POINTS_PER_BRICK;
+    playSound('bounce');
+    playSound('break');
 
     // Rebota en la cara por la que entró: el eje con menor penetración.
     const penX = Math.min(b.x + b.size - brick.x, brick.x + brick.w - b.x);
@@ -252,6 +295,7 @@ function bounceOffPaddle() {
   b.vx = dirX * BALL_SPEED * Math.sin(BALL_ANGLE);
   b.vy = -BALL_SPEED * Math.cos(BALL_ANGLE);
   b.y = p.y - b.size;
+  playSound('bounce');
 }
 
 function bounceOffWalls() {
@@ -259,13 +303,16 @@ function bounceOffWalls() {
   if (b.x < 0) {
     b.x = 0;
     b.vx = -b.vx;
+    playSound('bounce');
   } else if (b.x + b.size > CANVAS_W) {
     b.x = CANVAS_W - b.size;
     b.vx = -b.vx;
+    playSound('bounce');
   }
   if (b.y < 0) {
     b.y = 0;
     b.vy = -b.vy;
+    playSound('bounce');
   }
 }
 
@@ -297,8 +344,13 @@ function drawHud() {
   ctx.textBaseline = 'top';
   ctx.textAlign = 'left';
   ctx.fillText('Puntaje: ' + state.score, 24, 20);
+  ctx.textAlign = 'center';
+  ctx.fillText('Nivel ' + state.level + ' / ' + LEVEL_COUNT, CANVAS_W / 2, 20);
   ctx.textAlign = 'right';
   ctx.fillText('Vidas: ' + state.lives, CANVAS_W - 24, 20);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(state.muted ? 'Sonido: silenciado' : 'Sonido: activado', 24, CANVAS_H - 16);
 }
 
 function loop() {
@@ -336,6 +388,10 @@ function setKey(e, pressed) {
 }
 
 window.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() === 'm') {
+    state.muted = !state.muted;
+    return;
+  }
   setKey(e, true);
   if (state.phase === 'fin') {
     if (e.key === 'Enter') resetGame();
@@ -348,7 +404,6 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => setKey(e, false));
 
-buildBricks();
-placeBallOnPaddle();
+loadLevel(1);
 loadSpritesheet(() => {});
 requestAnimationFrame(loop);
