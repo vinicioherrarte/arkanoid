@@ -346,11 +346,13 @@ function drawHud() {
   ctx.fillText('Puntaje: ' + state.score, 24, 20);
   ctx.textAlign = 'center';
   ctx.fillText('Nivel ' + state.level + ' / ' + LEVEL_COUNT, CANVAS_W / 2, 20);
-  ctx.textAlign = 'right';
-  ctx.fillText('Vidas: ' + state.lives, CANVAS_W - 24, 20);
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText(state.muted ? 'Sonido: silenciado' : 'Sonido: activado', 24, CANVAS_H - 16);
+  for (let i = 0; i < state.lives; i++) {
+    drawSprite(ctx, 'ball', CANVAS_W - 24 - 12 - i * 20, 20, 12, 12);
+  }
+  ctx.textAlign = 'center';
+  ctx.font = '12px monospace';
+  ctx.fillStyle = '#888';
+  ctx.fillText('M: silenciar / activar', CANVAS_W / 2, 44);
 }
 
 function loop() {
