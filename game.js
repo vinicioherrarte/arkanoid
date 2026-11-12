@@ -1,15 +1,16 @@
 const CANVAS_W = 800;
 const CANVAS_H = 600;
-const GRID = { cols: 10, rows: 6, w: 72, h: 24, gap: 4, x0: 24, y0: 60 };
+const GRID = { cols: 10, rows: 6, w: 64, h: 20, gap: 4, x0: 62, y0: 60 };
 const ROW_COLORS = ['red', 'yellow', 'green', 'cyan', 'magenta', 'hotpink']; // de arriba abajo
 const PADDLE_KEY_SPEED = 8;          // px por cuadro
-const BALL_SPEED = 5;                // px por cuadro
+const BALL_SPEED = 3;                // px por cuadro
 const BALL_ANGLE = Math.PI / 4;      // 45 grados respecto a la vertical, fijo
 const RELAUNCH_DELAY_MS = 500;
 const POINTS_PER_BRICK = 10;
 const LIVES_START = 3;
 const HIGH_SCORES_KEY = 'arkanoid:v1';
 const HIGH_SCORES_MAX = 5;
+const EXPLOSION_FRAME_MS = EXPLOSION_DURATION / 4; // 37.5 ms por frame
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -26,6 +27,7 @@ const state = {
   mouseMovedThisFrame: false,
   keys: { left: false, right: false },
   relaunchAt: 0,
+  victoryAt: 0,        // timestamp (ms) desde el cual se muestra la victoria; 0 = no programada
 };
 
 function buildBricks() {
@@ -41,6 +43,7 @@ function buildBricks() {
         h: GRID.h,
         color: ROW_COLORS[row],
         alive: true,
+        explodingSince: null,
       });
     }
   }
@@ -96,7 +99,9 @@ function checkGameOver() {
   if (state.lives <= 0) {
     endGame('derrota');
   } else if (!state.bricks.some((b) => b.alive)) {
-    endGame('victoria');
+    const now = Date.now();
+    if (state.victoryAt === 0) state.victoryAt = now + EXPLOSION_DURATION;
+    if (now >= state.victoryAt) endGame('victoria');
   }
 }
 
@@ -144,7 +149,8 @@ function resetGame() {
   state.ball.vx = 0;
   state.ball.vy = 0;
   state.relaunchAt = 0;
-  buildBricks();
+  state.victoryAt = 0;
+  buildBricks(); // recrea los ladrillos con explodingSince = null
   placeBallOnPaddle();
 }
 
@@ -216,6 +222,7 @@ function bounceOffBricks() {
     if (!overlaps) continue;
 
     brick.alive = false;
+    brick.explodingSince = Date.now();
     state.score += POINTS_PER_BRICK;
 
     // Rebota en la cara por la que entró: el eje con menor penetración.
@@ -266,8 +273,15 @@ function draw() {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
   for (const b of state.bricks) {
-    if (!b.alive) continue;
-    drawSprite(ctx, 'block_' + b.color, b.x, b.y, b.w, b.h);
+    if (b.alive) {
+      drawSprite(ctx, 'block_' + b.color, b.x, b.y, b.w, b.h);
+    } else if (b.explodingSince !== null) {
+      const elapsed = Date.now() - b.explodingSince;
+      if (elapsed < EXPLOSION_DURATION) {
+        const frame = Math.min(3, Math.floor(elapsed / EXPLOSION_FRAME_MS));
+        drawFrame(ctx, EXPLOSION_FRAMES[b.color][frame], b.x, b.y, b.w, b.h);
+      }
+    }
   }
   const p = state.paddle;
   drawSprite(ctx, 'paddle', p.x, p.y, p.w, p.h);

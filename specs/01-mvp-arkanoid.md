@@ -1,6 +1,6 @@
 # SPEC 01: MVP Arkanoid
 
-> **Estado:** Aprobado
+> **Estado:** Implementado
 > **Depende de:** ninguna (primer spec del proyecto)
 > **Fecha:** 2026-11-11
 > **Objetivo:** Construir un juego Arkanoid jugable en una sola pantalla, con un nivel de 60 ladrillos, control con mouse y teclado, 3 vidas, puntaje de 10 puntos por ladrillo y top 5 guardado en localStorage.
